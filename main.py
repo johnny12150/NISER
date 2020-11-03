@@ -14,7 +14,7 @@ from model import *
 torch.cuda.set_device(1)
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='diginetica', help='dataset name: diginetica/yoochoose1_4/yoochoose1_64/sample')
-parser.add_argument('--batchSize', type=int, default=100, help='input batch size')
+parser.add_argument('--batchSize', type=int, default=50, help='input batch size')
 parser.add_argument('--hiddenSize', type=int, default=100, help='hidden state size')
 parser.add_argument('--epoch', type=int, default=30, help='the number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.001, help='learning rate')  # [0.001, 0.0005, 0.0001]
@@ -27,6 +27,8 @@ parser.add_argument('--nonhybrid', action='store_true', help='only use the globa
 parser.add_argument('--validation', action='store_true', help='validation')
 parser.add_argument('--valid_portion', type=float, default=0.1, help='split the portion of training set as validation set')
 parser.add_argument('--norm', default=True, help='adapt NISER, l2 norm over item and session embedding')
+parser.add_argument('--TA', default=False, help='use target-aware or not')
+parser.add_argument('--scale', default=True, help='scaling factor sigma')
 opt = parser.parse_args()
 print(opt)
 

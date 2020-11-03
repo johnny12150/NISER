@@ -60,6 +60,8 @@ class SessionGraph(Module):
         self.hidden_size = opt.hiddenSize
         self.n_node = n_node
         self.norm = opt.norm
+        self.ta = opt.TA
+        self.scale = opt.scale
         self.batch_size = opt.batchSize
         self.nonhybrid = opt.nonhybrid
         self.embedding = nn.Embedding(self.n_node, self.hidden_size)
@@ -68,6 +70,8 @@ class SessionGraph(Module):
         self.linear_two = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
         self.linear_three = nn.Linear(self.hidden_size, 1, bias=False)
         self.linear_transform = nn.Linear(self.hidden_size * 2, self.hidden_size, bias=True)
+        if self.ta:
+            self.linear_t = nn.Linear(self.hidden_size, self.hidden_size, bias=False)  # target attention
         self.loss_function = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=opt.lr, weight_decay=opt.l2)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=opt.lr_dc_step, gamma=opt.lr_dc)
@@ -87,10 +91,22 @@ class SessionGraph(Module):
         if not self.nonhybrid:
             a = self.linear_transform(torch.cat([a, ht], 1))
         if self.norm:
-            norms = torch.norm(self.embedding.weight, p=2, dim=1).data  # l2 norm over item embedding
+            # norms = torch.norm(a, p=2, dim=1, keepdim=True)  # a needs to be normalized too
+            # a = a.div(norms)
+            norms = torch.norm(self.embedding.weight, p=2, dim=1).data  # l2 norm over item embedding again for b
             self.embedding.weight.data = self.embedding.weight.data.div(norms.view(-1, 1).expand_as(self.embedding.weight))
         b = self.embedding.weight[1:]  # n_nodes x latent_size
-        scores = torch.matmul(a, b.transpose(1, 0))
+        if self.ta:
+            qt = self.linear_t(hidden)  # batch_size x seq_length x latent_size
+            beta = F.softmax(b @ qt.transpose(1, 2), -1)  # batch_size x n_nodes x seq_length
+            target = beta @ hidden  # batch_size x n_nodes x latent_size
+            a = a.view(ht.shape[0], 1, ht.shape[1])  # b,1,d
+            a = a + target  # b,n,d
+            scores = torch.sum(a * b, -1)  # b,n
+        else:
+            scores = torch.matmul(a, b.transpose(1, 0))
+        if self.scale:
+            scores = 16 * scores  # 16 is the sigma factor
         return scores
 
     def forward(self, inputs, A):
@@ -131,12 +147,12 @@ def forward(model, i, data):
     #     hidden = hidden.view(seq_shape)
     get = lambda i: hidden[i][alias_inputs[i]]
     seq_hidden = torch.stack([get(i) for i in torch.arange(len(alias_inputs)).long()])
-    # if model.norm:
-    #     seq_shape = list(seq_hidden.size())
-    #     seq_hidden = seq_hidden.view(-1, model.hidden_size)
-    #     norms = torch.norm(seq_hidden, p=2, dim=1)  # l2 norm over session embedding
-    #     seq_hidden = seq_hidden.div(norms.unsqueeze(-1).expand_as(seq_hidden))
-    #     seq_hidden = seq_hidden.view(seq_shape)
+    if model.norm:
+        seq_shape = list(seq_hidden.size())
+        seq_hidden = seq_hidden.view(-1, model.hidden_size)
+        norms = torch.norm(seq_hidden, p=2, dim=1)  # l2 norm over session embedding
+        seq_hidden = seq_hidden.div(norms.unsqueeze(-1).expand_as(seq_hidden))
+        seq_hidden = seq_hidden.view(seq_shape)
     return targets, model.compute_scores(seq_hidden, mask)
 
 
